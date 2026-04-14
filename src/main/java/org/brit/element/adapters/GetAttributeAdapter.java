@@ -34,6 +34,17 @@ public class GetAttributeAdapter {
         : null;
   }
 
+  /**
+   * Attributes whose DOM property always reflects the authoritative live state,
+   * even when the HTML source attribute has an initial value. For these we
+   * always prefer the property. Mirrors Selenium's getAttribute behavior, which
+   * returns {@code input.value} (the current typed value) rather than the
+   * {@code value="…"} markup.
+   */
+  private static final Set<String> propertyPreferredAttributes = Set.of(
+      "value", "innerhtml", "innertext", "textcontent"
+  );
+
   @Nullable
   public static String getAttribute(Locator locator, String name) {
     // sometimes relative href attribute is returned without leading /
@@ -46,8 +57,18 @@ public class GetAttributeAdapter {
       return isPresent ? "true" : null;
     }
 
+    // Selenium's getAttribute prefers the DOM property for attributes whose
+    // property reflects the live state (e.g. input.value after user types).
+    // Playwright's getAttribute only returns the HTML source attribute, which
+    // for these is stale or absent. Fall back to the property otherwise only
+    // when the HTML attribute is missing or empty.
+    if (propertyPreferredAttributes.contains(name.toLowerCase())) {
+      Object jsProp = locator.evaluate("node => node['%s']".formatted(name));
+      return jsProp != null ? jsProp.toString() : null;
+    }
+
     String attributeValue = locator.getAttribute(name);
-    if (attributeValue == null) {
+    if (attributeValue == null || attributeValue.isEmpty()) {
       Object jsProp = locator.evaluate("node => node['%s']".formatted(name));
       return jsProp != null ? jsProp.toString() : null;
     }

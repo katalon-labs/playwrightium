@@ -3,7 +3,6 @@ package org.brit.element;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.AriaRole;
 import com.microsoft.playwright.options.BoundingBox;
-import lombok.Getter;
 import org.apache.commons.text.CaseUtils;
 import org.brit.element.adapters.GetAttributeAdapter;
 import org.brit.driver.adapters.FindElementAdapter;
@@ -28,8 +27,11 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     private static final Pattern NOT_CHECKBOX_OR_RADIO = Pattern.compile("Not a checkbox or radio button");
 
-    @Getter
     private final Locator locator;
+
+    public Locator getLocator() {
+        return locator;
+    }
 
     public PlaywrightWebElement(Locator locator) {
         this.locator = locator;
@@ -37,6 +39,17 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public void click() {
+        // Playwright cannot click <option> elements directly because they're hidden
+        // inside the native select dropdown. Selenium's Select class clicks options
+        // to select them; to keep that compatible, route option.click() through the
+        // parent <select>'s selectOption() call.
+        String tagName = getTagName();
+        if ("option".equals(tagName)) {
+            String value = locator.evaluate("node => node.value").toString();
+            Locator parentSelect = locator.locator("xpath=ancestor::select[1]");
+            parentSelect.selectOption(new com.microsoft.playwright.options.SelectOption().setValue(value));
+            return;
+        }
         locator.click();
     }
 
@@ -114,11 +127,19 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public boolean isSelected() {
+        // Selenium's WebElement.isSelected() works for any selectable element:
+        // checkboxes/radios use the `checked` property, <option> uses `selected`.
+        // Playwright's isChecked() handles only checkboxes/radios — for <option>
+        // it returns false (or throws "Not a checkbox or radio button" on older
+        // versions). For options, we read node.selected directly.
+        if ("option".equals(getTagName())) {
+            return Boolean.TRUE.equals(locator.evaluate("node => node.selected"));
+        }
         try {
             return locator.isChecked();
         } catch (PlaywrightException e) {
             if (NOT_CHECKBOX_OR_RADIO.matcher(e.getMessage()).find()) {
-                return false;
+                return Boolean.TRUE.equals(locator.evaluate("node => !!node.selected || !!node.checked"));
             }
             throw e;
         }

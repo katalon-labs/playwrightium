@@ -17,7 +17,12 @@ import static com.microsoft.playwright.options.WaitForSelectorState.ATTACHED;
 
 public class FindElementAdapter {
     private static final Pattern INVALID_SELECTOR = Pattern.compile("(is not a valid XPath expression|Unexpected token \".*?\" while parsing selector)");
-    private static final Locator.WaitForOptions elementExists = new Locator.WaitForOptions().setState(ATTACHED);
+    // Short wait — Katalon's keyword layer already manages its own timeouts for
+    // findElement, retrying as needed. Using Playwright's default 30s here would
+    // make verifyElementNotPresent (and similar negative checks) take forever.
+    private static final Locator.WaitForOptions elementExists = new Locator.WaitForOptions()
+            .setState(ATTACHED)
+            .setTimeout(1000);
 
     public static List<WebElement> findElements(Locator locator) {
         try {

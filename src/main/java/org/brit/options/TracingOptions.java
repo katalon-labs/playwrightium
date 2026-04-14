@@ -1,7 +1,6 @@
 package org.brit.options;
 
 import com.microsoft.playwright.Tracing;
-import lombok.Getter;
 
 import java.nio.file.Path;
 
@@ -10,11 +9,17 @@ import java.nio.file.Path;
  * 24.06.2024 15:45
  **/
 public class TracingOptions {
-    @Getter
     private final Tracing.StartOptions startOptions = new Tracing.StartOptions();
 
-    @Getter
     private final Tracing.StopOptions stopOptions = new Tracing.StopOptions();
+
+    public Tracing.StartOptions getStartOptions() {
+        return startOptions;
+    }
+
+    public Tracing.StopOptions getStopOptions() {
+        return stopOptions;
+    }
 
     public TracingOptions() {
         startOptions

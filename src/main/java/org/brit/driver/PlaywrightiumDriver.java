@@ -5,8 +5,6 @@ import com.microsoft.playwright.options.AriaRole;
 import com.microsoft.playwright.options.Geolocation;
 import com.microsoft.playwright.options.MouseButton;
 import com.microsoft.playwright.options.ViewportSize;
-import lombok.Getter;
-import lombok.SneakyThrows;
 import org.apache.commons.text.CaseUtils;
 import org.brit.driver.adapters.FindElementAdapter;
 import org.brit.driver.adapters.JsExecutionAdapter;
@@ -40,8 +38,11 @@ import static java.util.Objects.requireNonNullElseGet;
 public class PlaywrightiumDriver extends RemoteWebDriver implements TakesScreenshot, Interactive {
     private final Playwright playwright;
     private final BrowserContext browserContext;
-    @Getter
     protected Page page;
+
+    public Page getPage() {
+        return page;
+    }
 
     @Nullable
     private Frame mainFrameCopy = null;
@@ -125,6 +126,15 @@ public class PlaywrightiumDriver extends RemoteWebDriver implements TakesScreens
             browserContext.tracing().start(startOptions);
         }
         page = browserContext.newPage();
+        // Register a perpetual dialog handler so Selenium-style post-hoc alert
+        // handling works. See PlaywrightuimAlert for details.
+        page.onDialog(dialogState::onDialog);
+    }
+
+    private final PlaywrightuimAlert.DialogState dialogState = new PlaywrightuimAlert.DialogState();
+
+    public PlaywrightuimAlert.DialogState getDialogState() {
+        return dialogState;
     }
 
 

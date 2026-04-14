@@ -1,6 +1,5 @@
 package org.brit.driver.adapters;
 
-import com.codeborne.selenide.impl.WebElementSource;
 import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.JSHandle;
 import com.microsoft.playwright.Page;
@@ -46,8 +45,19 @@ public class JsExecutionAdapter {
       case "HTMLCollection" -> processHtmlCollection(page, jsHandle);
       case "HTMLElement" -> converter.toPwElement(page, jsHandle.asElement());
       case "Array" -> processArray(page, jsHandle);
-      default -> jsHandle.jsonValue();
+      default -> normalizeReturnValue(jsHandle.jsonValue());
     };
+  }
+
+  /**
+   * Normalize return values to match Selenium's conventions.
+   * Selenium's executeScript always returns numeric values as Long, not Integer.
+   */
+  private Object normalizeReturnValue(Object value) {
+    if (value instanceof Integer) {
+      return ((Integer) value).longValue();
+    }
+    return value;
   }
 
   /**
@@ -59,12 +69,35 @@ public class JsExecutionAdapter {
    * @return A promise of the result of executing the asynchronous script.
    */
   public Object executeAsyncScript(Page page, String script, Object... args) {
-    String modifiedScript = removeReturnKeyword(script);
-    if (args.length > 0) {
-      return page.evaluate("async () => {%s}".formatted(modifiedScript), transformArguments(args));
-    } else {
-      return page.evaluate("async () => {%s}".formatted(modifiedScript));
+    // Skip Katalon SmartWait scripts — they depend on window.katalonWaiter
+    // which is injected by a Chrome extension that doesn't run under Playwright.
+    // Playwright's built-in auto-wait handles what SmartWait was designed for.
+    if (script != null && script.contains("window.katalonWaiter")) {
+      return null;
     }
+
+    // Selenium's executeAsyncScript convention: the last argument passed to the
+    // JS script is a callback that the script must invoke with the result.
+    // Playwright has no such callback mechanism, so we simulate it: wrap the
+    // script in a Promise, and inject a resolve function as the last element of
+    // the `arguments` array.
+    String modifiedScript = removeReturnKeyword(script);
+    String wrappedScript = """
+        async (arguments) => {
+          return await new Promise((resolve, reject) => {
+            arguments.push(resolve);
+            try {
+              (function() {
+                %s
+              }).apply(null, arguments);
+            } catch (e) {
+              reject(e);
+            }
+          });
+        }
+        """.formatted(modifiedScript);
+    var transformedArgs = args.length > 0 ? transformArguments(args) : List.of();
+    return normalizeReturnValue(page.evaluate(wrappedScript, transformedArgs));
   }
 
   private String removeReturnKeyword(String script) {
@@ -92,14 +125,19 @@ public class JsExecutionAdapter {
   }
 
   private Object transformArgument(Object arg) {
-    if (arg instanceof WebElementSource) {
-      return getElementHandleFrom((WebElementSource) arg);
-    } else if (arg instanceof WrapsElement) {
+    if (arg instanceof WrapsElement) {
       return getElementHandleFrom((WrapsElement) arg);
     } else if (arg instanceof WebElement) {
       return getElementHandleFrom((WebElement) arg);
     } else if (arg instanceof Collection) {
       return transformCollection((Collection<?>) arg);
+    } else if (arg instanceof Long) {
+      // Playwright's Serialization only supports Integer/Double, not Long
+      return ((Long) arg).doubleValue();
+    } else if (arg instanceof Short || arg instanceof Byte) {
+      return ((Number) arg).intValue();
+    } else if (arg instanceof Float) {
+      return ((Float) arg).doubleValue();
     }
     return arg;
   }
@@ -113,10 +151,6 @@ public class JsExecutionAdapter {
           .toList();
     }
     return List.copyOf(collection);
-  }
-
-  private ElementHandle getElementHandleFrom(WebElementSource source) {
-    return ((PlaywrightWebElement) source.getWebElement()).getLocator().elementHandle();
   }
 
   private ElementHandle getElementHandleFrom(WrapsElement wrapsElement) {

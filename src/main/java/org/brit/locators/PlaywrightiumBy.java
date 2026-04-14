@@ -3,7 +3,6 @@ package org.brit.locators;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.microsoft.playwright.options.AriaRole;
-import lombok.Getter;
 import org.jspecify.annotations.Nullable;
 import org.openqa.selenium.By;
 import org.openqa.selenium.SearchContext;
@@ -17,9 +16,12 @@ import java.util.List;
  * This is implementation to use Playwright getBy... methods.
  * @see <a href='https://playwright.dev/java/docs/locators'>Playwright. getBy... locators search</a>
  */
-@Getter
 public abstract class PlaywrightiumBy extends By implements By.Remotable {
     private final By.Remotable.Parameters remoteParameters;
+
+    public By.Remotable.Parameters getRemoteParameters() {
+        return remoteParameters;
+    }
 
     protected PlaywrightiumBy(String selector, AriaRole ariaRole,
                               @Nullable ArialSearchOptions pageAriaRoleOptions) {

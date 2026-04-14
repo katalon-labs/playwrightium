@@ -1,7 +1,5 @@
 package org.brit.options;
 
-import lombok.Getter;
-
 import java.util.List;
 
 /**
@@ -18,11 +16,14 @@ public enum Browsers {
     MSEDGE_BETA_CHANNEL("msedge-beta"),
     MSEDGE_DEV_CHANNEL("msedge-dev");
 
-    @Getter
     private final String value;
 
     Browsers(String value) {
         this.value = value;
+    }
+
+    public String getValue() {
+        return value;
     }
 
     @Override

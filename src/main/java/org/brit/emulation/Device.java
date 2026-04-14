@@ -1,21 +1,13 @@
 package org.brit.emulation;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import com.microsoft.playwright.options.ViewportSize;
-import lombok.Data;
-import org.apache.commons.io.FileUtils;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.Map;
+import java.util.Objects;
 
 /**
  * Created by Serhii Bryt
  * 29.03.2024 13:50
  **/
-@Data
 public class Device {
     private String userAgent;
     private ViewportSize viewport;
@@ -24,11 +16,45 @@ public class Device {
     private boolean hasTouch;
     private String defaultBrowserType;
 
-    public static void main(String[] args) throws IOException {
-        File file = new File(Device.class.getClassLoader().getResource("devices/deviceDescriptorsSource.json").getPath());
-        String json = FileUtils.readFileToString(file, Charset.defaultCharset());
-        Gson gson = new Gson();
-        Map<String, Device> map = gson.fromJson(json, new TypeToken<Map<String, Device>>() {
-        }.getType());
+    public String getUserAgent() { return userAgent; }
+    public void setUserAgent(String userAgent) { this.userAgent = userAgent; }
+
+    public ViewportSize getViewport() { return viewport; }
+    public void setViewport(ViewportSize viewport) { this.viewport = viewport; }
+
+    public double getDeviceScaleFactor() { return deviceScaleFactor; }
+    public void setDeviceScaleFactor(double deviceScaleFactor) { this.deviceScaleFactor = deviceScaleFactor; }
+
+    public boolean isMobile() { return isMobile; }
+    public void setMobile(boolean isMobile) { this.isMobile = isMobile; }
+
+    public boolean isHasTouch() { return hasTouch; }
+    public void setHasTouch(boolean hasTouch) { this.hasTouch = hasTouch; }
+
+    public String getDefaultBrowserType() { return defaultBrowserType; }
+    public void setDefaultBrowserType(String defaultBrowserType) { this.defaultBrowserType = defaultBrowserType; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Device device = (Device) o;
+        return Double.compare(device.deviceScaleFactor, deviceScaleFactor) == 0
+                && isMobile == device.isMobile && hasTouch == device.hasTouch
+                && Objects.equals(userAgent, device.userAgent)
+                && Objects.equals(viewport, device.viewport)
+                && Objects.equals(defaultBrowserType, device.defaultBrowserType);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(userAgent, viewport, deviceScaleFactor, isMobile, hasTouch, defaultBrowserType);
+    }
+
+    @Override
+    public String toString() {
+        return "Device(userAgent=" + userAgent + ", viewport=" + viewport
+                + ", deviceScaleFactor=" + deviceScaleFactor + ", isMobile=" + isMobile
+                + ", hasTouch=" + hasTouch + ", defaultBrowserType=" + defaultBrowserType + ")";
     }
 }

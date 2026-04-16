@@ -1,0 +1,33 @@
+src/test/java/org/brit/element/SendKeysTest.java
+  829d1b5272516559 1-131
+src/main/java/org/brit/element/PlaywrightWebElement.java
+  829d1b5272516559 48-53,56-75,101-134,145-175,183,185,188-190,196-201,216-233,356-361,363-367
+src/main/java/org/brit/driver/adapters/JsExecutionAdapter.java
+  829d1b5272516559 31-36
+src/test/java/org/brit/element/JsExecutionTest.java
+  829d1b5272516559 76-104
+src/test/java/org/brit/element/MultiSelectToggleTest.java
+  829d1b5272516559 1-84
+src/test/java/org/brit/element/SubmitTest.java
+  829d1b5272516559 1-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "3f0344155996c6e9683b26200baeda4df4e73077",
+  "prompts": {
+    "829d1b5272516559": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d4cbd71-626b-472d-8c6f-cc86e147aa8b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Coty Rosenblath",
+      "messages": [],
+      "total_additions": 506,
+      "total_deletions": 57,
+      "accepted_lines": 467,
+      "overriden_lines": 0
+    }
+  }
+}

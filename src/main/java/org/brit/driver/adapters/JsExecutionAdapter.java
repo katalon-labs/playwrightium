@@ -27,10 +27,13 @@ public class JsExecutionAdapter {
    * @return The result of executing the script.
    */
   public Object executeScript(Page page, String script, Object... args) {
-    String modifiedScript = removeReturnKeyword(script);
-
     var arguments = args.length > 0 ? transformArguments(args) : List.of();
-    JSHandle jsHandle = page.evaluateHandle("(arguments) => " + modifiedScript, arguments);
+    // Wrap as block body so multi-statement scripts (var/let/const, loops, etc.)
+    // are legal. Selenium users write `return X;` to return a value — that works
+    // inside a block. An arrow *expression* body would reject anything but a
+    // single expression.
+    String wrapped = "(arguments) => {\n" + script + "\n}";
+    JSHandle jsHandle = page.evaluateHandle(wrapped, arguments);
     String type = jsHandle.evaluate(
         """
             (node) => {

@@ -45,9 +45,34 @@ public class PlaywrightWebElement extends RemoteWebElement {
         // parent <select>'s selectOption() call.
         String tagName = getTagName();
         if ("option".equals(tagName)) {
+            // Capture the parent <select>, whether it's multi-select, and the
+            // clicked option's value. For a multi-select, clicking an already-
+            // unselected option adds to the selection (like ctrl+click); we
+            // simulate this by collecting current values + the new one and
+            // handing the full list to selectOption. For a single-select,
+            // selectOption(value) replaces — which matches click semantics.
             String value = locator.evaluate("node => node.value").toString();
             Locator parentSelect = locator.locator("xpath=ancestor::select[1]");
-            parentSelect.selectOption(new com.microsoft.playwright.options.SelectOption().setValue(value));
+            Boolean isMulti = (Boolean) parentSelect.evaluate("s => s.multiple");
+            if (Boolean.TRUE.equals(isMulti)) {
+                // Multi-select: click toggles the clicked option (like ctrl+click).
+                // Gather the current selection, flip membership of the clicked
+                // value, and hand the full updated list to selectOption.
+                Object current = parentSelect.evaluate(
+                        "s => Array.from(s.selectedOptions).map(o => o.value)");
+                java.util.List<String> values = new java.util.ArrayList<>();
+                if (current instanceof java.util.Collection) {
+                    for (Object v : (java.util.Collection<?>) current) values.add(String.valueOf(v));
+                }
+                if (values.contains(value)) {
+                    values.remove(value);
+                } else {
+                    values.add(value);
+                }
+                parentSelect.selectOption(values.toArray(new String[0]));
+            } else {
+                parentSelect.selectOption(new com.microsoft.playwright.options.SelectOption().setValue(value));
+            }
             return;
         }
         locator.click();
@@ -73,7 +98,40 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public void submit() {
-        locator.evaluate("locator => locator.submit();");
+        // Selenium semantics: submit() on any element submits its enclosing form
+        // as if the user had clicked a submit button — so the submit event fires
+        // and onsubmit handlers run. If the form has a submit-type button, click
+        // it inside waitForNavigation so Playwright auto-waits for the resulting
+        // navigation (avoids "Execution context destroyed" in callers that race
+        // against an in-flight navigation). Otherwise fall back to requestSubmit.
+        Page page = locator.page();
+        Object submitButton = locator.evaluate(
+                "el => {" +
+                "  const form = el.tagName === 'FORM' ? el : (el.form || el.closest('form'));" +
+                "  if (!form) throw new Error('Element is not inside a form');" +
+                "  return form.querySelector('button[type=submit], input[type=submit]');" +
+                "}");
+        try {
+            page.waitForNavigation(
+                    new Page.WaitForNavigationOptions().setTimeout(5000),
+                    () -> {
+                        if (submitButton != null) {
+                            Locator btn = locator.locator(
+                                    "xpath=ancestor-or-self::form[1]//*[(self::button or self::input) and @type='submit'][1]");
+                            btn.click();
+                        } else {
+                            locator.evaluate(
+                                    "el => {" +
+                                    "  const form = el.tagName === 'FORM' ? el : (el.form || el.closest('form'));" +
+                                    "  if (typeof form.requestSubmit === 'function') form.requestSubmit();" +
+                                    "  else form.submit();" +
+                                    "}");
+                        }
+                    });
+        } catch (PlaywrightException navTimeout) {
+            // Submit didn't cause navigation (AJAX form, SPA, same-page handler).
+            // Nothing more to do — the submit event already fired above.
+        }
     }
 
     @Override
@@ -84,15 +142,37 @@ public class PlaywrightWebElement extends RemoteWebElement {
                 toSend.append(charSequence);
             }
             locator.setInputFiles(Paths.get(toSend.toString()));
-        } else {
-            StringBuilder toSend = new StringBuilder();
-            for (CharSequence charSequence : keysToSend) {
-                if (charSequence.length() == 1 && Keys.getKeyFromUnicode(charSequence.charAt(0)) != null) {
-                    var keyToPress = CaseUtils
-                            .toCamelCase(Keys.getKeyFromUnicode(
-                                            charSequence.charAt(0)).name(),
-                                    true,
-                                    ' ');
+            return;
+        }
+        // Selenium semantics: sendKeys appends at the cursor and may interleave
+        // plain text with special keys (e.g. Keys.TAB). CLICK (not focus) the
+        // element first so a real mousedown bubbles to the document — popups
+        // like jQuery UI datepicker listen to document.mousedown to close
+        // themselves, and a programmatic .focus() doesn't trigger it.
+        //
+        // Use force:true to bypass Playwright's "receives events" hit-test.
+        // Selenium's sendKeys doesn't do that check, and some pages (e.g. CURA
+        // healthcare's table-based forms) have inputs whose center returns the
+        // parent <td> from elementFromPoint, which makes the default hit-test
+        // fail and the click retry for 30 s. force:true still dispatches real
+        // mouse events — the only thing skipped is the pre-click DOM check.
+        //
+        // After the click we route all subsequent key events through
+        // page.keyboard so Tab/Shift+Tab can legitimately move focus and later
+        // chars land on the now-focused element (matching Selenium's Actions).
+        locator.click(new Locator.ClickOptions().setForce(true));
+        com.microsoft.playwright.Keyboard keyboard = locator.page().keyboard();
+        StringBuilder run = new StringBuilder();
+        for (CharSequence charSequence : keysToSend) {
+            for (int i = 0; i < charSequence.length(); i++) {
+                char c = charSequence.charAt(i);
+                Keys special = Keys.getKeyFromUnicode(c);
+                if (special != null) {
+                    if (run.length() > 0) {
+                        keyboard.type(run.toString());
+                        run.setLength(0);
+                    }
+                    String keyToPress = CaseUtils.toCamelCase(special.name(), true, ' ');
                     keyToPress = switch (keyToPress) {
                         case "Left" -> "ArrowLeft";
                         case "Up" -> "ArrowUp";
@@ -100,17 +180,25 @@ public class PlaywrightWebElement extends RemoteWebElement {
                         case "Right" -> "ArrowRight";
                         default -> keyToPress;
                     };
-                    locator.press(keyToPress);
+                    keyboard.press(keyToPress);
                 } else {
-                    toSend.append(charSequence);
+                    run.append(c);
                 }
             }
-            locator.fill(toSend.toString());
+        }
+        if (run.length() > 0) {
+            keyboard.type(run.toString());
         }
     }
 
     @Override
     public void clear() {
+        // Playwright's clear() uses fill('') internally, which rejects file
+        // inputs ("Input of type 'file' cannot be filled"). For file inputs,
+        // clearing is a no-op — setInputFiles replaces the selection anyway.
+        if ("file".equals(locator.getAttribute("type"))) {
+            return;
+        }
         locator.clear(new Locator.ClearOptions().setForce(true));
     }
 
@@ -123,6 +211,24 @@ public class PlaywrightWebElement extends RemoteWebElement {
     @Override
     public String getAttribute(String name) {
         return GetAttributeAdapter.getAttribute(locator, name);
+    }
+
+    /**
+     * RemoteWebElement.equals compares on {@code this.id}, which we don't set.
+     * Katalon keywords (e.g. verifyOptionSelectedByLabel) call equals to dedupe
+     * matching elements — without this override, they NPE. Compare by the
+     * underlying Playwright locator identity.
+     */
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) return true;
+        if (!(other instanceof PlaywrightWebElement)) return false;
+        return locator.equals(((PlaywrightWebElement) other).locator);
+    }
+
+    @Override
+    public int hashCode() {
+        return locator.hashCode();
     }
 
     @Override
@@ -247,8 +353,18 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public Point getLocation() {
+        // Playwright's boundingBox returns viewport-relative coordinates.
+        // Selenium's contract is document-relative (scroll-independent), which
+        // Katalon's verifyElement{In,NotIn}Viewport depends on — it checks
+        // whether getRect() falls inside the viewport box (0,0,vpW,vpH), so
+        // viewport-relative coordinates would incorrectly report a scrolled-off
+        // element as visible.
         BoundingBox boundingBox = locator.boundingBox();
-        return new Point((int) boundingBox.x, (int) boundingBox.y);
+        Number scrollX = (Number) locator.page().evaluate("() => window.scrollX || window.pageXOffset || 0");
+        Number scrollY = (Number) locator.page().evaluate("() => window.scrollY || window.pageYOffset || 0");
+        return new Point(
+                (int) (boundingBox.x + scrollX.doubleValue()),
+                (int) (boundingBox.y + scrollY.doubleValue()));
     }
 
     @Override

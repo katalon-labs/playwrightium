@@ -73,6 +73,35 @@ public class JsExecutionTest {
         assertThat(result).isEqualTo(42L);
     }
 
+    // --- Multi-statement scripts ---
+
+    /**
+     * Selenium callers routinely pass multi-statement scripts (var declarations,
+     * DOM mutation, etc.). The script must be wrapped in a block, not an
+     * expression body — otherwise the JS parser rejects {@code var}/{@code let}
+     * as "Unexpected token".
+     */
+    @Test
+    public void executeScript_acceptsMultiStatementScript() {
+        Object result = ((JavascriptExecutor) driver).executeScript(
+                "var x = 1;"
+              + "var y = 2;"
+              + "return x + y;");
+        assertThat(((Number) result).longValue()).isEqualTo(3L);
+    }
+
+    @Test
+    public void executeScript_acceptsMultiStatementScriptWithNoReturn() {
+        // Mutates the DOM; no return value. Must not throw.
+        ((JavascriptExecutor) driver).executeScript(
+                "var b = document.createElement('div');"
+              + "b.id = 'multi-stmt-banner';"
+              + "document.body.appendChild(b);");
+        Object found = ((JavascriptExecutor) driver).executeScript(
+                "return document.getElementById('multi-stmt-banner') !== null");
+        assertThat(found).isEqualTo(true);
+    }
+
     // --- Async scripts ---
 
     /**

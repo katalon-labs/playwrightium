@@ -157,11 +157,23 @@ public class PlaywrightWebElement extends RemoteWebElement {
         // fail and the click retry for 30 s. force:true still dispatches real
         // mouse events — the only thing skipped is the pre-click DOM check.
         //
-        // After the click we route all subsequent key events through
-        // page.keyboard so Tab/Shift+Tab can legitimately move focus and later
-        // chars land on the now-focused element (matching Selenium's Actions).
+        // Firefox quirk: clicking an input that opens a datepicker grid can
+        // leave focus on the grid instead of the input, so the following
+        // keystrokes go into the void. Re-asserting focus() after the click
+        // is a no-op on Chromium (click already focused the input) and fixes
+        // Firefox.
+        //
+        // Then route key events through page.keyboard so Tab/Shift+Tab can
+        // legitimately move focus and later chars land on the now-focused
+        // element (matching Selenium's Actions). A small per-char delay gives
+        // the event loop time to settle after the click/focus — Playwright's
+        // docs recommend this ("types slower, like a user") and it eliminates
+        // dropped first chars.
         locator.click(new Locator.ClickOptions().setForce(true));
+        locator.focus();
         com.microsoft.playwright.Keyboard keyboard = locator.page().keyboard();
+        com.microsoft.playwright.Keyboard.TypeOptions typeOpts =
+                new com.microsoft.playwright.Keyboard.TypeOptions().setDelay(20);
         StringBuilder run = new StringBuilder();
         for (CharSequence charSequence : keysToSend) {
             for (int i = 0; i < charSequence.length(); i++) {
@@ -169,7 +181,7 @@ public class PlaywrightWebElement extends RemoteWebElement {
                 Keys special = Keys.getKeyFromUnicode(c);
                 if (special != null) {
                     if (run.length() > 0) {
-                        keyboard.type(run.toString());
+                        keyboard.type(run.toString(), typeOpts);
                         run.setLength(0);
                     }
                     String keyToPress = CaseUtils.toCamelCase(special.name(), true, ' ');
@@ -187,7 +199,33 @@ public class PlaywrightWebElement extends RemoteWebElement {
             }
         }
         if (run.length() > 0) {
-            keyboard.type(run.toString());
+            keyboard.type(run.toString(), typeOpts);
+        }
+        // Dismiss any popup (jQuery UI datepicker etc.) bound to
+        // document.mousedown outside its own subtree. Without this, a picker
+        // opened by this field's focus can still be visible when the next
+        // action runs — and if the next action is a click at a coordinate
+        // that overlaps the picker, the browser's elementFromPoint routes it
+        // to a calendar cell instead of the intended target (e.g. clicking
+        // the comment field coord lands on day 10 of a visible December 2016
+        // calendar, committing the wrong date).
+        dispatchOutsideMousedown();
+    }
+
+    /**
+     * Fires a synthetic mousedown on document.body so that jQuery-style
+     * "close on outside click" handlers close any open popup. Synthetic
+     * events aren't isTrusted but typical handlers only check event.target,
+     * which is the body — definitionally outside any popup's subtree.
+     */
+    private void dispatchOutsideMousedown() {
+        try {
+            locator.page().evaluate(
+                    "() => document.body.dispatchEvent(" +
+                    "  new MouseEvent('mousedown', {bubbles: true, cancelable: true}))");
+        } catch (PlaywrightException ignored) {
+            // Page may have navigated away as a side-effect of the keys
+            // (e.g. Enter submitting a form) — nothing to dismiss.
         }
     }
 

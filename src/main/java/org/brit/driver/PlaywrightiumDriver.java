@@ -137,6 +137,53 @@ public class PlaywrightiumDriver extends RemoteWebDriver implements TakesScreens
         return dialogState;
     }
 
+    @Override
+    public org.openqa.selenium.Capabilities getCapabilities() {
+        String browserName = (String) options.getCapability("browserName");
+        String displayName = "Playwright " + (browserName != null ? browserName : "unknown");
+
+        // Report the actual browser version (Chromium 147.x, Firefox 139.x, etc.)
+        // from the running browser instance, not the Playwright library version.
+        String browserVersion = "";
+        try {
+            browserVersion = browserContext.browser().version();
+        } catch (Exception ignored) {}
+
+        String playwrightiumVersion = "";
+        try {
+            // In OSGi, Implementation-Version is stripped by Tycho, but
+            // Bundle-Version survives. Read it from this class's own manifest.
+            var res = PlaywrightiumDriver.class.getResource(
+                    "/" + PlaywrightiumDriver.class.getName().replace('.', '/') + ".class");
+            if (res != null) {
+                String path = res.toString();
+                if (path.startsWith("jar:") || path.startsWith("bundle:")) {
+                    // Try the pom.properties that Maven always embeds.
+                    var props = PlaywrightiumDriver.class.getResourceAsStream(
+                            "/META-INF/maven/io.github.britka/playwrightium/pom.properties");
+                    if (props != null) {
+                        var p = new java.util.Properties();
+                        p.load(props);
+                        playwrightiumVersion = p.getProperty("version", "");
+                        props.close();
+                    }
+                }
+            }
+            if (playwrightiumVersion.isEmpty()) {
+                Package pkg = PlaywrightiumDriver.class.getPackage();
+                if (pkg != null && pkg.getImplementationVersion() != null) {
+                    playwrightiumVersion = pkg.getImplementationVersion();
+                }
+            }
+        } catch (Exception ignored) {}
+
+        var caps = new org.openqa.selenium.MutableCapabilities();
+        caps.setCapability("browserName", displayName);
+        caps.setCapability("browserVersion", browserVersion);
+        caps.setCapability("platformName", System.getProperty("os.name"));
+        caps.setCapability("playwrightiumVersion", playwrightiumVersion);
+        return caps;
+    }
 
     private BrowserType getBrowserType(String browser) {
         switch (browser) {

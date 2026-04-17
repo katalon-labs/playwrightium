@@ -37,8 +37,38 @@ public class PlaywrightWebElement extends RemoteWebElement {
         this.locator = locator;
     }
 
+    /**
+     * Wraps an action in a Playwright tracing group so the trace viewer
+     * shows the Selenium-level operation (e.g. "WebElement.click") instead
+     * of just the raw Playwright API calls it dispatches. When tracing is
+     * inactive this is essentially free — Playwright's tracing().group()
+     * records a marker but only surfaces in the trace output when recording.
+     * All failures are swallowed so we never break a test because of tracing.
+     */
+    private <T> T traced(String name, java.util.function.Supplier<T> action) {
+        AutoCloseable group = null;
+        try {
+            group = locator.page().context().tracing().group(name);
+        } catch (Throwable ignored) {}
+        try {
+            return action.get();
+        } finally {
+            if (group != null) {
+                try { group.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    private void tracedVoid(String name, Runnable action) {
+        traced(name, () -> { action.run(); return null; });
+    }
+
     @Override
     public void click() {
+        tracedVoid("WebElement.click", this::clickInternal);
+    }
+
+    private void clickInternal() {
         // Playwright cannot click <option> elements directly because they're hidden
         // inside the native select dropdown. Selenium's Select class clicks options
         // to select them; to keep that compatible, route option.click() through the
@@ -98,6 +128,10 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public void submit() {
+        tracedVoid("WebElement.submit", this::submitInternal);
+    }
+
+    private void submitInternal() {
         // Selenium semantics: submit() on any element submits its enclosing form
         // as if the user had clicked a submit button — so the submit event fires
         // and onsubmit handlers run. If the form has a submit-type button, click
@@ -136,6 +170,20 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public void sendKeys(CharSequence... keysToSend) {
+        String label = sendKeysLabel(keysToSend);
+        tracedVoid(label, () -> sendKeysInternal(keysToSend));
+    }
+
+    private String sendKeysLabel(CharSequence[] keysToSend) {
+        StringBuilder preview = new StringBuilder();
+        for (CharSequence cs : keysToSend) preview.append(cs);
+        String text = preview.toString();
+        if (text.length() > 40) text = text.substring(0, 40) + "…";
+        // Keep the label short and single-line for the trace viewer.
+        return "WebElement.sendKeys(\"" + text.replace("\n", "\\n") + "\")";
+    }
+
+    private void sendKeysInternal(CharSequence... keysToSend) {
         if ("file".equals(locator.getAttribute("type"))) {
             StringBuilder toSend = new StringBuilder();
             for (CharSequence charSequence : keysToSend) {
@@ -231,24 +279,28 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public void clear() {
-        // Playwright's clear() uses fill('') internally, which rejects file
-        // inputs ("Input of type 'file' cannot be filled"). For file inputs,
-        // clearing is a no-op — setInputFiles replaces the selection anyway.
-        if ("file".equals(locator.getAttribute("type"))) {
-            return;
-        }
-        locator.clear(new Locator.ClearOptions().setForce(true));
+        tracedVoid("WebElement.clear", () -> {
+            // Playwright's clear() uses fill('') internally, which rejects file
+            // inputs ("Input of type 'file' cannot be filled"). For file inputs,
+            // clearing is a no-op — setInputFiles replaces the selection anyway.
+            if ("file".equals(locator.getAttribute("type"))) {
+                return;
+            }
+            locator.clear(new Locator.ClearOptions().setForce(true));
+        });
     }
 
     @Override
     public String getTagName() {
-        return String.valueOf(locator.evaluate("node => node.tagName")).toLowerCase();
+        return traced("WebElement.getTagName",
+                () -> String.valueOf(locator.evaluate("node => node.tagName")).toLowerCase());
     }
 
     @Nullable
     @Override
     public String getAttribute(String name) {
-        return GetAttributeAdapter.getAttribute(locator, name);
+        return traced("WebElement.getAttribute(\"" + name + "\")",
+                () -> GetAttributeAdapter.getAttribute(locator, name));
     }
 
     /**
@@ -271,6 +323,10 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public boolean isSelected() {
+        return traced("WebElement.isSelected", this::isSelectedInternal);
+    }
+
+    private boolean isSelectedInternal() {
         // Selenium's WebElement.isSelected() works for any selectable element:
         // checkboxes/radios use the `checked` property, <option> uses `selected`.
         // Playwright's isChecked() handles only checkboxes/radios — for <option>
@@ -291,22 +347,24 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public boolean isEnabled() {
-        return locator.isEnabled();
+        return traced("WebElement.isEnabled", () -> locator.isEnabled());
     }
 
     @Override
     public String getText() {
-        return locator.textContent();
+        return traced("WebElement.getText", () -> locator.textContent());
     }
 
     @Override
     public List<WebElement> findElements(By by) {
-        return FindElementAdapter.findElements(getLocatorFromBy(by));
+        return traced("WebElement.findElements(" + by + ")",
+                () -> FindElementAdapter.findElements(getLocatorFromBy(by)));
     }
 
     @Override
     public WebElement findElement(By by) {
-        return FindElementAdapter.findElement(getLocatorFromBy(by), by);
+        return traced("WebElement.findElement(" + by + ")",
+                () -> FindElementAdapter.findElement(getLocatorFromBy(by), by));
     }
 
     @Nullable
@@ -386,44 +444,48 @@ public class PlaywrightWebElement extends RemoteWebElement {
 
     @Override
     public boolean isDisplayed() {
-        return locator.isVisible();
+        return traced("WebElement.isDisplayed", () -> locator.isVisible());
     }
 
     @Override
     public Point getLocation() {
-        // Playwright's boundingBox returns viewport-relative coordinates.
-        // Selenium's contract is document-relative (scroll-independent), which
-        // Katalon's verifyElement{In,NotIn}Viewport depends on — it checks
-        // whether getRect() falls inside the viewport box (0,0,vpW,vpH), so
-        // viewport-relative coordinates would incorrectly report a scrolled-off
-        // element as visible.
-        BoundingBox boundingBox = locator.boundingBox();
-        Number scrollX = (Number) locator.page().evaluate("() => window.scrollX || window.pageXOffset || 0");
-        Number scrollY = (Number) locator.page().evaluate("() => window.scrollY || window.pageYOffset || 0");
-        return new Point(
-                (int) (boundingBox.x + scrollX.doubleValue()),
-                (int) (boundingBox.y + scrollY.doubleValue()));
+        return traced("WebElement.getLocation", () -> {
+            // Playwright's boundingBox returns viewport-relative coordinates.
+            // Selenium's contract is document-relative (scroll-independent), which
+            // Katalon's verifyElement{In,NotIn}Viewport depends on — it checks
+            // whether getRect() falls inside the viewport box (0,0,vpW,vpH), so
+            // viewport-relative coordinates would incorrectly report a scrolled-off
+            // element as visible.
+            BoundingBox boundingBox = locator.boundingBox();
+            Number scrollX = (Number) locator.page().evaluate("() => window.scrollX || window.pageXOffset || 0");
+            Number scrollY = (Number) locator.page().evaluate("() => window.scrollY || window.pageYOffset || 0");
+            return new Point(
+                    (int) (boundingBox.x + scrollX.doubleValue()),
+                    (int) (boundingBox.y + scrollY.doubleValue()));
+        });
     }
 
     @Override
     public Dimension getSize() {
-        BoundingBox boundingBox = locator.boundingBox();
-        return new Dimension((int) boundingBox.width, (int) boundingBox.height);
+        return traced("WebElement.getSize", () -> {
+            BoundingBox boundingBox = locator.boundingBox();
+            return new Dimension((int) boundingBox.width, (int) boundingBox.height);
+        });
     }
 
     @Override
     public Rectangle getRect() {
-        return new Rectangle(getLocation(), getSize());
+        return traced("WebElement.getRect", () -> new Rectangle(getLocation(), getSize()));
     }
 
     @Override
     public String getCssValue(String propertyName) {
-        return locator
-                .evaluate("element => " +
-                        "window.getComputedStyle(element).getPropertyValue('%s')"
-                                .formatted(propertyName))
-                .toString();
-
+        return traced("WebElement.getCssValue(\"" + propertyName + "\")",
+                () -> locator
+                        .evaluate("element => " +
+                                "window.getComputedStyle(element).getPropertyValue('%s')"
+                                        .formatted(propertyName))
+                        .toString());
     }
 
     @Override

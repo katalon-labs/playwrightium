@@ -137,6 +137,23 @@ public class PlaywrightiumDriver extends RemoteWebDriver implements TakesScreens
         return dialogState;
     }
 
+    /**
+     * Opens a Playwright tracing group named {@code name} that nests every
+     * subsequent Playwright API call until {@code close()} on the returned
+     * AutoCloseable. When tracing is not recording, this is a no-op (the
+     * group marker is simply never surfaced in the trace output). Callers
+     * (e.g. Katalon's WebUI keyword interceptor) use this to annotate their
+     * higher-level operations so the trace viewer shows meaningful entries
+     * instead of a stream of raw evaluate/click/fill calls.
+     */
+    public AutoCloseable startTraceGroup(String name) {
+        try {
+            return browserContext.tracing().group(name);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     @Override
     public org.openqa.selenium.Capabilities getCapabilities() {
         String browserName = (String) options.getCapability("browserName");

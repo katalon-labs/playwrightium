@@ -430,11 +430,12 @@ public class PlaywrightiumDriver extends RemoteWebDriver implements TakesScreens
     @Override
     public Set<String> getWindowHandles() {
         Set<String> handles = new LinkedHashSet<>();
-        try {
-            PlaywrightiumDriver.this.page.bringToFront();
-        } catch (Exception ignore) {
-
-        }
+        // Note: we deliberately don't call page.bringToFront() here. Katalon/
+        // Selenium query window handles very frequently (for implicit window
+        // tracking) and bringing the current page to the foreground each time
+        // flooded Playwright traces with bringToFront entries for no benefit —
+        // listing context().pages() doesn't require the current page to be
+        // frontmost.
         List<Page> pages = PlaywrightiumDriver.this.page.context().pages();
         for (Page pageTemp : pages) {
             try {
@@ -680,18 +681,46 @@ public class PlaywrightiumDriver extends RemoteWebDriver implements TakesScreens
 
         @Override
         public WebDriver window(String nameOrHandle) {
+            // Empty / null handles aren't valid in Selenium — they throw
+            // NoSuchWindowException. Katalon (switchToAvailableWindow) calls
+            // window("") deliberately to force that exception; without this
+            // guard we would match on any page whose window.name is empty
+            // (which is most pages), flooding the trace with bringToFront
+            // calls and preventing Katalon's fallback logic from running.
+            if (nameOrHandle == null || nameOrHandle.isEmpty()) {
+                throw new NoSuchWindowException("No such window: " + nameOrHandle);
+            }
+
+            // Fast path: already on the target window. Katalon calls
+            // switchTo().window(handle) between keyword invocations as a safety
+            // measure; in the common case the handle matches the current page
+            // and we can skip all the per-page evaluate() + bringToFront()
+            // chatter that otherwise floods the Playwright trace.
+            try {
+                Field guid = page.getClass().getSuperclass().getDeclaredField("guid");
+                guid.setAccessible(true);
+                if (guid.get(page).toString().equals(nameOrHandle)) {
+                    return PlaywrightiumDriver.this;
+                }
+            } catch (NoSuchFieldException | IllegalAccessException ignored) {}
+
             List<Page> pages = page.context().pages();
             for (Page pageElement : pages) {
                 try {
                     Field guid = pageElement.getClass().getSuperclass().getDeclaredField("guid");
                     guid.setAccessible(true);
-                    String evaluate = (String) pageElement.evaluate("page => window.name");
-                    if (guid.get(pageElement).toString().equals(nameOrHandle) || nameOrHandle.equals(evaluate)) {
+                    // Check GUID first; only fall back to evaluating window.name
+                    // (an RTT per page) when the GUID didn't match.
+                    boolean match = guid.get(pageElement).toString().equals(nameOrHandle);
+                    if (!match) {
+                        String windowName = (String) pageElement.evaluate("page => window.name");
+                        match = nameOrHandle.equals(windowName);
+                    }
+                    if (match) {
                         pageElement.bringToFront();
                         PlaywrightiumDriver.this.page = pageElement;
                         return PlaywrightiumDriver.this;
                     }
-
                 } catch (NoSuchFieldException | IllegalAccessException e) {
                     throw new RuntimeException(e);
                 }

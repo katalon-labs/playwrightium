@@ -455,13 +455,16 @@ public class PlaywrightWebElement extends RemoteWebElement {
             // Katalon's verifyElement{In,NotIn}Viewport depends on — it checks
             // whether getRect() falls inside the viewport box (0,0,vpW,vpH), so
             // viewport-relative coordinates would incorrectly report a scrolled-off
-            // element as visible.
+            // element as visible. Combine scrollX+scrollY into one evaluate so we
+            // emit a single trace entry instead of two.
             BoundingBox boundingBox = locator.boundingBox();
-            Number scrollX = (Number) locator.page().evaluate("() => window.scrollX || window.pageXOffset || 0");
-            Number scrollY = (Number) locator.page().evaluate("() => window.scrollY || window.pageYOffset || 0");
+            @SuppressWarnings("unchecked")
+            List<Number> scroll = (List<Number>) locator.page().evaluate(
+                    "() => [window.scrollX || window.pageXOffset || 0, "
+                        + "window.scrollY || window.pageYOffset || 0]");
             return new Point(
-                    (int) (boundingBox.x + scrollX.doubleValue()),
-                    (int) (boundingBox.y + scrollY.doubleValue()));
+                    (int) (boundingBox.x + scroll.get(0).doubleValue()),
+                    (int) (boundingBox.y + scroll.get(1).doubleValue()));
         });
     }
 
